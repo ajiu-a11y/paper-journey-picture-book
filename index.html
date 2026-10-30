@@ -158,6 +158,14 @@
     .side { display: none; }
     .bar .arrow { display: grid; }
   }
+  @media (hover: none) and (pointer: coarse) {
+    .side { display: none; }
+    .bar .arrow { display: grid; }
+  }
+  @media (hover: none) and (pointer: coarse) and (orientation: landscape) {
+    .bar { margin-top: 8px; min-height: 38px; gap: 12px; }
+    .bar .arrow { width: 38px; height: 38px; }
+  }
   .fs {
     position: fixed; top: max(14px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); z-index: 20;
     width: 44px; height: 44px; border-radius: 50%; border: 0; background: transparent; color: rgba(243,237,226,.6);
@@ -168,6 +176,14 @@
   .fs .ico-exit { display: none; }
   .is-fs .fs .ico-enter { display: none; }
   .is-fs .fs .ico-exit { display: block; }
+  .notice {
+    position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); z-index: 60;
+    max-width: min(86vw, 460px); padding: 11px 16px; border-radius: 8px;
+    background: rgba(18,20,23,.94); color: var(--rice); font: 14px/1.5 var(--sans);
+    text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,.35); opacity: 0;
+    transform: translate(-50%, 8px); transition: opacity .2s, transform .2s; pointer-events: none;
+  }
+  .notice.show { opacity: 1; transform: translate(-50%, 0); }
   .mus {
     position: fixed; top: max(14px, env(safe-area-inset-top)); right: calc(max(14px, env(safe-area-inset-right)) + 48px); z-index: 20;
     width: 44px; height: 44px; border-radius: 50%; border: 0; background: transparent; color: rgba(243,237,226,.6);
@@ -261,6 +277,7 @@
     <svg class="ico-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
     <svg class="ico-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
   </button>
+  <div class="notice" id="notice" role="status" aria-live="polite"></div>
 </div>
 
 <script>
@@ -282,16 +299,21 @@
   var state = 0, busy = false;
 
   function fit() {
-    var vw = window.innerWidth, vh = window.innerHeight;
-    var narrow = vw <= 760;
-    var padX = narrow ? 20 : 190;
-    var padY = narrow ? 110 : 150;
+    var vv = window.visualViewport;
+    var vw = vv ? vv.width : window.innerWidth;
+    var vh = vv ? vv.height : window.innerHeight;
+    var compact = vw <= 760 || (window.matchMedia && matchMedia("(pointer: coarse)").matches);
+    var landscape = vw > vh;
+    var padX = compact ? (landscape ? 84 : 24) : 190;
+    var padY = compact ? (landscape ? 78 : 116) : 150;
     var W = Math.min(vw - padX, (vh - padY) * A, 1800);
     W = Math.max(W, 200);
     root.style.setProperty("--W", W.toFixed(1) + "px");
     root.style.setProperty("--H", (W / A).toFixed(1) + "px");
   }
   window.addEventListener("resize", fit);
+  window.addEventListener("orientationchange", function () { setTimeout(fit, 180); });
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", fit);
   fit();
 
   function face(s, side) {
@@ -474,6 +496,13 @@
 
   // fullscreen
   var fsBtn = document.getElementById("fs");
+  var notice = document.getElementById("notice"), noticeTimer;
+  function showNotice(msg) {
+    notice.textContent = msg;
+    notice.classList.add("show");
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(function () { notice.classList.remove("show"); }, 3600);
+  }
   function fsEl() { return document.fullscreenElement || document.webkitFullscreenElement; }
   function setFsUI(on) {
     root.classList.toggle("is-fs", on);
@@ -482,20 +511,25 @@
     setTimeout(fit, 60);
   }
   fsBtn.addEventListener("click", function () {
-    var on = root.classList.contains("is-fs");
     if (fsEl()) {
-      setFsUI(false);
       var ex = document.exitFullscreen || document.webkitExitFullscreen;
-      try { var q = ex.call(document); if (q && q.catch) q.catch(function () {}); } catch (e) {}
-    } else if (on) {
-      setFsUI(false);
+      if (!ex) { showNotice("当前浏览器不支持退出网页全屏，请使用系统返回手势。"); return; }
+      try {
+        var q = ex.call(document);
+        if (q && q.catch) q.catch(function () { showNotice("退出全屏失败，请使用浏览器的返回手势。"); });
+      } catch (e) { showNotice("退出全屏失败，请使用浏览器的返回手势。"); }
     } else {
-      setFsUI(true);
       var el = document.documentElement;
       var req = el.requestFullscreen || el.webkitRequestFullscreen;
-      if (req) {
-        try { var p = req.call(el); if (p && p.catch) p.catch(function () {}); } catch (e) {}
-      }
+      if (!req) { showNotice("当前浏览器不支持网页全屏。请用手机浏览器打开，并尝试横屏或添加到主屏幕。"); return; }
+      try {
+        var p = req.call(el);
+        if (p && p.then) p.then(function () {
+          setFsUI(true);
+          if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(function () {});
+        }).catch(function () { showNotice("浏览器阻止了全屏。请从浏览器菜单选择全屏，或横屏观看。"); });
+        else setFsUI(!!fsEl());
+      } catch (e) { showNotice("浏览器阻止了全屏。请从浏览器菜单选择全屏，或横屏观看。"); }
     }
   });
   function onFs() { setFsUI(!!fsEl()); }
